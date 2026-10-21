@@ -731,7 +731,7 @@ function NeighborhoodPieChart({ gradient }) {
 
 function App() {
   /** Top-level mode: floor charts vs map-based scenario planning. */
-  const [planningMode, setPlanningMode] = useState('scenario-planning')
+  const [planningMode, setPlanningMode] = useState('stack-planning')
   /** Directory list, or the full-screen draft editor. */
   const [appView, setAppView] = useState('directory')
   const stackPlanRef = useRef(null)
