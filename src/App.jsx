@@ -1211,6 +1211,15 @@ function App() {
     showRightPanel('agent')
   }, [showRightPanel])
 
+  /** Scenario drafts open with Robin Agent visible, including after a mode switch that closes the rail. */
+  const openScenarioDraftAgent = useCallback(() => {
+    agentWasOpenRef.current = false
+    queuedRightPanelRef.current = null
+    exitingRightPanelRef.current = null
+    activeRightPanelRef.current = 'agent'
+    setActiveRightPanel('agent')
+  }, [])
+
   const handleStackDecision = useCallback((brief) => {
     setAgentBrief(brief)
     openAgentSidebar()
@@ -1280,6 +1289,7 @@ function App() {
     setFocusedDesk(null)
     setSelectedUserIds([])
     handlePlanningModeChange('scenario-planning')
+    openScenarioDraftAgent()
     setAppView('draft')
   }
 
@@ -1290,6 +1300,7 @@ function App() {
 
   const openDraft = (mode = planningMode) => {
     if (mode !== planningMode) handlePlanningModeChange(mode)
+    if (mode === 'scenario-planning') openScenarioDraftAgent()
     setAppView('draft')
   }
 
@@ -1311,6 +1322,7 @@ function App() {
 
   const openDraftChooser = (mode, view) => {
     if (mode !== planningMode) handlePlanningModeChange(mode)
+    if (mode === 'scenario-planning' && view === 'draft') openScenarioDraftAgent()
     setAppView(view)
   }
 
