@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faArrowUp, faChevronRight, faEllipsis, faXmark } from '@fortawesome/free-solid-svg-icons'
+import { faArrowUp, faCheck, faChevronRight, faEllipsis, faXmark } from '@fortawesome/free-solid-svg-icons'
+import robinAvatar from './assets/robin-agent-avatar.png'
 
 function AgentComposer({ inputId, showPrompts = true }) {
   return (
@@ -32,6 +33,88 @@ function AgentComposer({ inputId, showPrompts = true }) {
   )
 }
 
+function RobinMark() {
+  return <img className="agent-chat-robin" src={robinAvatar} alt="" />
+}
+
+function AgentThinking() {
+  return (
+    <span className="agent-thinking" role="status" aria-label="Robin is working">
+      <span />
+      <span />
+      <span />
+      <span />
+    </span>
+  )
+}
+
+function StepSpinner() {
+  return (
+    <span className="agent-activity-dots" aria-hidden>
+      {Array.from({ length: 8 }, (_, index) => (
+        <span key={index} style={{ transform: `rotate(${index * 45}deg)` }} />
+      ))}
+    </span>
+  )
+}
+
+function AgentChat({ messages, onSuggestion }) {
+  return (
+    <div className="agent-chat">
+      {messages.map((message) => (
+        message.role === 'user' ? (
+          <div className="agent-chat-user" key={message.id}>
+            <div className="agent-chat-user-bubble">{message.text}</div>
+            <span className="agent-chat-user-avatar" aria-hidden>C</span>
+          </div>
+        ) : message.spinnerOnly ? (
+          <div className="agent-chat-agent agent-chat-agent--spinner" key={message.id}>
+            <AgentThinking />
+          </div>
+        ) : (
+          <div className="agent-chat-agent" key={message.id}>
+            {message.id === 'welcome' ? null : <RobinMark />}
+            {message.activity?.length ? (
+              <ol className="agent-activity">
+                {message.activity.map((step) => (
+                  <li key={step.id} className={`agent-activity-step agent-activity-step--${step.state}`}>
+                    <span className="agent-activity-mark" aria-hidden>
+                      {step.state === 'active' ? <StepSpinner /> : <FontAwesomeIcon icon={faCheck} />}
+                    </span>
+                    <span className="agent-activity-label">{step.label}</span>
+                  </li>
+                ))}
+              </ol>
+            ) : null}
+            {message.loading ? <AgentThinking /> : null}
+            {message.text ? (
+              <div className="agent-chat-copy">
+                {message.text.split('\n\n').map((paragraph, index) => (
+                  <p key={`${message.id}-${index}`}>{paragraph}</p>
+                ))}
+              </div>
+            ) : null}
+            {message.suggestions?.length ? (
+              <div className="agent-chat-suggestions">
+                {message.suggestions.map((suggestion) => (
+                  <button
+                    key={suggestion.id}
+                    type="button"
+                    className="agent-sidebar-prompt"
+                    onClick={() => onSuggestion?.(suggestion)}
+                  >
+                    {suggestion.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        )
+      ))}
+    </div>
+  )
+}
+
 /** Compact agent docked under a task sidebar — header expands to the full rail. */
 export function AgentMiniPanel({ onExpand }) {
   return (
@@ -54,10 +137,11 @@ export function AgentMiniPanel({ onExpand }) {
 }
 
 /** Placeholder Ask Robin agent rail — open panel or collapsed edge tab. */
-function AgentSidebar({ open, onOpen, onClose, onExited, selectedUsers = [], brief = null, onSuggestion, showTab = true }) {
+function AgentSidebar({ open, onOpen, onClose, onExited, selectedUsers = [], brief = null, messages = null, onSuggestion, showTab = true }) {
   const layerRef = useRef(null)
   const tabRef = useRef(null)
   const panelRef = useRef(null)
+  const bodyRef = useRef(null)
   const [tabTop, setTabTop] = useState(null)
   const [tabDragging, setTabDragging] = useState(false)
   const [mounted, setMounted] = useState(open)
@@ -84,6 +168,12 @@ function AgentSidebar({ open, onOpen, onClose, onExited, selectedUsers = [], bri
       onExited?.()
     }
   }
+
+  useEffect(() => {
+    const body = bodyRef.current
+    if (!body || !messages?.length) return
+    body.scrollTop = body.scrollHeight
+  }, [messages])
 
   useEffect(() => {
     if (tabTop == null) return undefined
@@ -169,7 +259,8 @@ function AgentSidebar({ open, onOpen, onClose, onExited, selectedUsers = [], bri
         </button>
       </div>
 
-      <div className="agent-sidebar-body">
+      <div className="agent-sidebar-body" ref={bodyRef}>
+        {messages?.length ? <AgentChat messages={messages} onSuggestion={onSuggestion} /> : null}
         {brief?.text ? (
           <div className="agent-sidebar-brief" role="status">
             {brief.text.split('\n\n').map((paragraph) => (
@@ -182,7 +273,7 @@ function AgentSidebar({ open, onOpen, onClose, onExited, selectedUsers = [], bri
                     key={suggestion.id}
                     type="button"
                     className="agent-sidebar-prompt"
-                    onClick={() => onSuggestion?.(suggestion.id)}
+                    onClick={() => onSuggestion?.(suggestion)}
                   >
                     {suggestion.label}
                   </button>
@@ -206,7 +297,7 @@ function AgentSidebar({ open, onOpen, onClose, onExited, selectedUsers = [], bri
       </div>
 
       <div className="agent-sidebar-footer">
-        <AgentComposer inputId="agent-sidebar-input" showPrompts={!brief?.text} />
+        <AgentComposer inputId="agent-sidebar-input" showPrompts={!brief?.text && !messages?.length} />
       </div>
       </aside>
         </div>

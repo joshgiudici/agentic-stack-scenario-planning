@@ -302,17 +302,6 @@ function stackStartSummary(request, parsed, models) {
   return lines.join('\n\n')
 }
 
-export const STACK_START_SUGGESTIONS = [
-  { id: 'department', label: 'Departments' },
-  { id: 'manager', label: 'Managers' },
-  { id: 'neighborhood', label: 'Neighborhoods' },
-]
-
-export const CURRENT_STACK_AGENT = {
-  text: 'You’re looking at the current stack. This is the published floor plan, so these counts stay locked. Draft a new stack plan from departments, managers, or neighborhoods when you want to change allocations.',
-  suggestions: STACK_START_SUGGESTIONS,
-}
-
 export function createStackDraft(users, request) {
   const parsed =
     request.kind === 'basis'

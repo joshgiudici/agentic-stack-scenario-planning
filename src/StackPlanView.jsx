@@ -1,43 +1,316 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
-import { Segmented } from 'antd'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faArrowDown19, faArrowDown91, faArrowUp, faEllipsis, faPlus, faXmark } from '@fortawesome/free-solid-svg-icons'
-import { DIRECTORY_DEPARTMENTS } from './mockData.js'
+import { faArrowDown19, faArrowDown91, faEllipsis, faXmark } from '@fortawesome/free-solid-svg-icons'
+import { DIRECTORY_DEPARTMENTS, FLOOR_OPTIONS } from './mockData.js'
 import { NEIGHBORHOOD_PALETTE } from './neighborhoodData.js'
 import {
   buildStackPlanModel,
   departmentColor,
   floorLegend,
-  stackPlanCatalog,
-  summarizeStackPlan,
 } from './stackPlanData.js'
-import { createStackDraft, CURRENT_STACK_AGENT } from './stackPlanPrompt.js'
-
-const PLAN_VERSIONS = [
-  { label: 'Current stack', value: 'current' },
-  { label: 'New stack plan', value: 'new' },
-]
+import { createStackDraft } from './stackPlanPrompt.js'
 
 function othersLabel(count) {
   return count === 1 ? 'and 1 other' : `and ${count} others`
 }
 
-const DIMENSIONS = [
-  { label: 'Department', value: 'department' },
-  { label: 'Manager', value: 'manager' },
-  { label: 'Neighborhood', value: 'neighborhood' },
-]
-
 const STARTS = [
-  { id: 'department', label: 'Desk assignments by department', basis: 'department' },
-  { id: 'usage-department', label: 'Desk usage by departments' },
-  { id: 'current', label: 'Show my current stack', action: 'current' },
-  { id: 'manager', label: 'Desk assignments by manager', basis: 'manager' },
-  { id: 'usage-manager', label: 'Desk usage by manager' },
-  { id: 'neighborhood', label: 'Desks within current neighborhoods', basis: 'neighborhood' },
+  { id: 'assignments', label: 'Build from current desk assignments' },
+  { id: 'usage', label: 'Build from desk usage' },
   { id: 'free-space', label: 'Help me free up extra space' },
   { id: 'growth', label: 'Help me plan for upcoming growth' },
 ]
+
+const GROUPINGS = [
+  { id: 'department', label: 'Departments' },
+  { id: 'manager', label: 'Manager' },
+  { id: 'neighborhood', label: 'Existing neighborhoods' },
+]
+
+const USAGE_CAVEATS = [
+  'These numbers account for check-ins for all desks whether they are assigned, hot, or hotel desks.',
+  'I’ve also made sure to consider in-office peak days, so that we’re not basing usage on days with lowest attendance.',
+]
+
+function groupingLabel(basis) {
+  if (basis === 'manager') return 'manager'
+  if (basis === 'neighborhood') return 'existing neighborhoods'
+  return 'departments'
+}
+
+function planNote(source, basis) {
+  const group = groupingLabel(basis)
+  return source === 'usage' ? `Desk usage organized by ${group}` : `Desk assignments organized by ${group}`
+}
+
+function assignmentActivity(basis) {
+  const group = groupingLabel(basis)
+  return [
+    {
+      id: 'assignments',
+      active: 'Fetching live desk assignments...',
+      pending: 'Fetch live desk assignments',
+      done: 'Found live desk assignments',
+    },
+    {
+      id: 'group',
+      active: `Matching desks to ${group}...`,
+      pending: `Match desks to ${group}`,
+      done: `Matched desks to ${group}`,
+    },
+    {
+      id: 'floors',
+      active: 'Building allocations for each floor...',
+      pending: 'Build allocations for each floor',
+      done: 'Built allocations for each floor',
+    },
+  ]
+}
+
+function usageActivity(basis) {
+  const group = groupingLabel(basis)
+  return [
+    {
+      id: 'checkins',
+      active: 'Fetching desk check-ins from the last 90 days...',
+      pending: 'Fetch desk check-ins from the last 90 days',
+      done: 'Found desk check-ins from the last 90 days',
+    },
+    {
+      id: 'peak',
+      active: 'Checking peak in-office days...',
+      pending: 'Check peak in-office days',
+      done: 'Checked peak in-office days',
+    },
+    {
+      id: 'group',
+      active: `Matching check-ins to ${group}...`,
+      pending: `Match check-ins to ${group}`,
+      done: `Matched check-ins to ${group}`,
+    },
+  ]
+}
+
+const UPDATE_ACTIVITY = [
+  {
+    id: 'review',
+    active: 'Reviewing the current stack plan...',
+    pending: 'Review the current stack plan',
+    done: 'Reviewed the current stack plan',
+  },
+  {
+    id: 'desks',
+    active: 'Checking open desks on each floor...',
+    pending: 'Check open desks on each floor',
+    done: 'Checked open desks on each floor',
+  },
+  {
+    id: 'update',
+    active: 'Updating floor allocations...',
+    pending: 'Update floor allocations',
+    done: 'Updated floor allocations',
+  },
+]
+
+function generatedPlanCopy(source, basis) {
+  if (source === 'assignments' && basis === 'manager') {
+    return [
+      'I’ve generated a stack plan based on your current floor plan’s desk assignments organized by manager.',
+      'Each manager represented and the number of desks per manager is based on the current desk assignments that are live for this building.',
+    ].join('\n\n')
+  }
+  if (source === 'assignments' && basis === 'neighborhood') {
+    return [
+      'I’ve generated a stack plan based on your current floor plan’s desk assignments, organized by your existing published Neighborhoods across each floor.',
+      'Each neighborhood represented and the number of desks per neighborhood is based on the current desk assignments that are live for this building.',
+    ].join('\n\n')
+  }
+  if (source === 'assignments') {
+    return [
+      'I’ve generated a stack plan based on your current floor plan’s desk assignments organized by departments.',
+      'Each department represented and the number of desks per department is based on the current desk assignments that are live for this building.',
+    ].join('\n\n')
+  }
+  const intro = basis === 'neighborhood'
+    ? 'I’ve generated a stack plan organized by your existing published Neighborhoods across each floor.'
+    : basis === 'manager'
+      ? 'I’ve generated a stack plan organized by manager.'
+      : 'I’ve generated a stack plan organized by departments.'
+  const counts = basis === 'neighborhood'
+    ? 'The number of allocations per neighborhood reflects usage numbers of desk check-ins of desks in each neighborhood for the last 90 days.'
+    : basis === 'manager'
+      ? 'The number of allocations per manager reflects usage numbers of desk check-ins of desks for each manager for the last 90 days.'
+      : 'The number of allocations per department reflects usage numbers of desk check-ins of desks in each department for the last 90 days.'
+  return [intro, counts, ...USAGE_CAVEATS].join('\n\n')
+}
+
+function releaseShare(catalog) {
+  let released = 0
+  const next = catalog.map((row) => {
+    const drop = Math.round(row.count * 0.2)
+    released += drop
+    return { ...row, count: row.count - drop }
+  })
+  if (released === 0) {
+    const largest = next.reduce((best, row) => (row.count > (best?.count ?? 0) ? row : best), null)
+    if (largest?.count) largest.count -= 1
+  }
+  return next.filter((row) => row.count > 0)
+}
+
+function holdBackUnused(draft, basis) {
+  return {
+    ...draft,
+    note: planNote('usage', basis),
+    detail: null,
+    groupType: basis === 'manager' ? 'manager' : 'department',
+    floors: draft.floors.map((floor) => ({
+      ...floor,
+      catalog: releaseShare(floor.catalog),
+    })),
+  }
+}
+
+function openDesks(floor) {
+  return Math.max(0, floor.total - floor.catalog.reduce((sum, row) => sum + row.count, 0))
+}
+
+function inactivateFloor(draft, floorId, basis) {
+  const source = draft.floors.find((floor) => floor.id === floorId)
+  const displaced = source.catalog.map((row) => ({ ...row }))
+  const floors = draft.floors.map((floor) => ({
+    ...floor,
+    catalog: floor.id === floorId ? [] : floor.catalog.map((row) => ({ ...row })),
+  }))
+  const receivers = floors.filter((floor) => floor.id !== floorId)
+  let leftover = 0
+
+  for (const row of displaced) {
+    let remaining = row.count
+    const hosts = [
+      ...receivers.filter((floor) => floor.catalog.some((item) => item.key === row.key)),
+      ...receivers.filter((floor) => !floor.catalog.some((item) => item.key === row.key)),
+    ]
+    for (const target of hosts) {
+      if (remaining <= 0) break
+      const room = openDesks(target)
+      if (room <= 0) continue
+      const add = Math.min(remaining, room)
+      let existing = target.catalog.find((item) => item.key === row.key)
+      if (!existing) {
+        existing = { key: row.key, label: row.label, color: row.color, count: 0 }
+        target.catalog.push(existing)
+      }
+      existing.count += add
+      remaining -= add
+    }
+    leftover += remaining
+  }
+
+  const group = groupingLabel(basis)
+  return {
+    draft: {
+      ...draft,
+      note: `Inactivated ${source.label}, organized by ${group}`,
+      detail: null,
+      groupType: basis === 'manager' ? 'manager' : 'department',
+      floors,
+    },
+    leftover,
+    floorLabel: source.label,
+  }
+}
+
+function inactivateActivity(basis, floorLabel) {
+  const group = groupingLabel(basis)
+  return [
+    {
+      id: 'assignments',
+      active: 'Fetching live desk assignments...',
+      pending: 'Fetch live desk assignments',
+      done: 'Found live desk assignments',
+    },
+    {
+      id: 'group',
+      active: `Matching desks to ${group}...`,
+      pending: `Match desks to ${group}`,
+      done: `Matched desks to ${group}`,
+    },
+    {
+      id: 'move',
+      active: `Moving ${floorLabel} allocations onto the other floors...`,
+      pending: `Move ${floorLabel} allocations onto the other floors`,
+      done: `Moved ${floorLabel} allocations onto the other floors`,
+    },
+  ]
+}
+
+function inactivatedPlanCopy(floorLabel, basis, leftover) {
+  const group = groupingLabel(basis)
+  const paragraphs = [
+    `I’ve inactivated ${floorLabel} and redistributed its allocations across the other floors, organized by ${group}.`,
+    'The desks that moved are based on the current desk assignments that are live for this building.',
+  ]
+  if (leftover > 0) {
+    paragraphs.push(
+      leftover === 1
+        ? 'One desk is unassigned because the other floors are full.'
+        : `${leftover} desks are unassigned because the other floors are full.`,
+    )
+  }
+  return paragraphs.join('\n\n')
+}
+
+function growDraft(draft, mode) {
+  let added = 0
+  const floors = draft.floors.map((floor) => {
+    const catalog = floor.catalog.map((row) => ({ ...row }))
+    let open = Math.max(0, floor.total - catalog.reduce((sum, row) => sum + row.count, 0))
+    const give = (row, amount) => {
+      const add = Math.min(amount, open)
+      if (add <= 0) return
+      row.count += add
+      open -= add
+      added += add
+    }
+
+    if (mode === 'all') {
+      const rows = catalog.filter((row) => row.count > 0).sort((a, b) => b.count - a.count)
+      for (const row of rows) give(row, 1)
+      return { ...floor, catalog: catalog.filter((row) => row.count > 0) }
+    }
+
+    let row = catalog.find((item) => item.key === mode)
+    if (row?.count) give(row, 2)
+    return { ...floor, catalog: catalog.filter((item) => item.count > 0) }
+  })
+
+  if (mode !== 'all' && added === 0) {
+    const label = mode.replace(/^dept:/, '')
+    const ranked = [...floors].sort((a, b) => {
+      const openA = a.total - a.catalog.reduce((sum, row) => sum + row.count, 0)
+      const openB = b.total - b.catalog.reduce((sum, row) => sum + row.count, 0)
+      return openB - openA
+    })
+    const target = ranked.find((floor) => floor.total > floor.catalog.reduce((sum, row) => sum + row.count, 0))
+    if (target) {
+      const open = target.total - target.catalog.reduce((sum, row) => sum + row.count, 0)
+      const add = Math.min(2, open)
+      target.catalog = [
+        ...target.catalog,
+        { key: mode, label, color: departmentColor(label), count: add },
+      ]
+      added += add
+    }
+  }
+
+  return { draft: { ...draft, floors }, added }
+}
+
+const EMPTY_STACK_BRIEF = {
+  text: 'Draft a new stack plan\n\nPlan desk allocations across the floors of your building.\n\nLooking for a starting point? Try creating your stack from some of these ideas:',
+  suggestions: STARTS.map((start) => ({ id: start.id, label: start.label })),
+}
 
 const STACK_PREPARE_MS = 3000
 
@@ -53,70 +326,6 @@ function StackPlanLoading({ label }) {
     </div>
   )
 }
-function StackPrompt({ text, error, onTextChange, onSubmit, onStart, onViewCurrent }) {
-  return (
-    <div className="stack-plan stack-plan--prompt">
-      <form
-        className="stack-prompt"
-        onSubmit={(event) => {
-          event.preventDefault()
-          onSubmit(text)
-        }}
-      >
-        <h1 className="stack-prompt-title">Draft a new stack plan</h1>
-        <p className="stack-prompt-copy">Plan desk allocations across the floors of your building</p>
-        <div className="stack-prompt-field">
-          <textarea
-            rows={3}
-            value={text}
-            autoFocus
-            aria-label="Stack plan prompt"
-            placeholder="Tell Robin how to set up your stack plan..."
-            onChange={(event) => onTextChange(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault()
-                onSubmit(text)
-              }
-            }}
-          />
-          <div className="stack-prompt-field-actions">
-            <button type="button" className="stack-prompt-add" aria-label="Add">
-              <FontAwesomeIcon icon={faPlus} />
-            </button>
-            <button type="submit" className="stack-prompt-send" aria-label="Draft stack plan" disabled={!text.trim()}>
-              <FontAwesomeIcon icon={faArrowUp} />
-            </button>
-          </div>
-        </div>
-        {error ? (
-          <p className="stack-prompt-error" role="alert">
-            {error}
-          </p>
-        ) : null}
-        <div className="stack-prompt-divider" aria-hidden />
-        <h2 className="stack-prompt-ideas-title">Looking for a starting point?</h2>
-        <p className="stack-prompt-ideas-copy">Try creating your stack from some of these ideas:</p>
-        <div className="stack-prompt-starts">
-          {STARTS.map((start) => (
-            <button
-              key={start.id}
-              type="button"
-              className="stack-prompt-start"
-              onClick={() => {
-                if (start.action === 'current') onViewCurrent()
-                else if (start.basis) onStart(start.basis)
-              }}
-            >
-              {start.label}
-            </button>
-          ))}
-        </div>
-      </form>
-    </div>
-  )
-}
-
 const ALLOCATION_TYPES = [
   { value: 'department', label: 'Department' },
   { value: 'manager', label: 'Manager' },
@@ -231,8 +440,6 @@ function AllocationAdder({ defaultType, departments, managers, usedKeys, usedCol
 }
 
 function StackPlanSidebar({
-  planVersion,
-  onPlanVersionChange,
   summary,
   floorLabel,
   editing,
@@ -271,15 +478,6 @@ function StackPlanSidebar({
 
   return (
     <aside className="stack-plan-sidebar">
-      <div className="stack-plan-version">
-        <Segmented
-          block
-          aria-label="Stack version"
-          value={planVersion}
-          onChange={onPlanVersionChange}
-          options={PLAN_VERSIONS}
-        />
-      </div>
       {floorLabel ? (
         <div className="stack-plan-floor-header">
           <span>{floorLabel}</span>
@@ -560,39 +758,20 @@ function paintDesks(floor, rows) {
   return painted.slice(0, floor.total)
 }
 
-function applyFloorEdits(floor, dimension, model) {
-  const base = new Map(floor.rows.map((row) => [row.key, row.count]))
-  const catalog = stackPlanCatalog(model, dimension, floor.id)
-  const editRows = catalog.map((category) => ({
-    ...category,
-    count: base.get(category.key) ?? 0,
-  }))
-  const assigned = editRows.reduce((sum, row) => sum + row.count, 0)
-  const unassigned = Math.max(0, floor.total - assigned)
-  const rows = editRows
-    .filter((row) => row.count > 0)
-    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
-  return {
-    ...floor,
-    rows,
-    editRows,
-    unassigned,
-    desks: paintDesks(floor, rows),
-  }
-}
-
-function StackPlanView({ users, agentOpen = false, onDecision, onPrepare, onReset, onAgentTabChange }, ref) {
-  const [planVersion, setPlanVersion] = useState('new')
-  const [dimension, setDimension] = useState('department')
+function StackPlanView({ users, agentOpen = false, onDecision, onReset, onAgentTabChange }, ref) {
   const [selectedFloorId, setSelectedFloorId] = useState(null)
   const [opened, setOpened] = useState(false)
   const [draft, setDraft] = useState(null)
-  const [promptText, setPromptText] = useState('')
-  const [promptError, setPromptError] = useState(null)
   const [preparing, setPreparing] = useState(null)
   const [edits, setEdits] = useState({})
   const [drag, setDrag] = useState(null)
   const [floorsReversed, setFloorsReversed] = useState(false)
+  const turnRef = useRef(0)
+  const agentMessage = (fields) => ({
+    id: `agent-${turnRef.current += 1}`,
+    role: 'agent',
+    ...fields,
+  })
   const floorsRef = useRef([])
   const skipFloorClickRef = useRef(false)
   const prepareTimers = useRef([])
@@ -602,8 +781,8 @@ function StackPlanView({ users, agentOpen = false, onDecision, onPrepare, onRese
   }, [])
 
   useEffect(() => {
-    onAgentTabChange?.(opened && !preparing)
-  }, [opened, preparing, onAgentTabChange])
+    onAgentTabChange?.(opened)
+  }, [opened, onAgentTabChange])
 
   const allocationChoices = useMemo(() => {
     const managerModel = buildStackPlanModel(users, 'manager')
@@ -619,20 +798,15 @@ function StackPlanView({ users, agentOpen = false, onDecision, onPrepare, onRese
     }
   }, [users])
 
-  const model = useMemo(() => buildStackPlanModel(users, dimension), [users, dimension])
-  const showingNew = planVersion === 'new'
-  const editable = showingNew && Boolean(draft)
-  const publishedFloors = useMemo(
-    () => model.floors.map((floor) => applyFloorEdits(floor, dimension, model)),
-    [model, dimension],
-  )
+  const floorModel = useMemo(() => buildStackPlanModel(users, 'department'), [users])
+  const editable = Boolean(draft)
   const draftFloors = useMemo(
     () => (draft ? draft.floors.map((floor) => presentDraftFloor(floor, edits)) : []),
     [draft, edits],
   )
   const blankFloors = useMemo(
     () =>
-      publishedFloors.map((floor) =>
+      floorModel.floors.map((floor) =>
         presentDraftFloor(
           {
             id: floor.id,
@@ -644,9 +818,9 @@ function StackPlanView({ users, agentOpen = false, onDecision, onPrepare, onRese
           {},
         ),
       ),
-    [publishedFloors],
+    [floorModel],
   )
-  const floors = preparing || (showingNew && !draft) ? blankFloors : showingNew ? draftFloors : publishedFloors
+  const floors = preparing || !draft ? blankFloors : draftFloors
   floorsRef.current = floors
   const orderedFloors = useMemo(() => {
     const ascending = [...floors].sort((a, b) => a.id.localeCompare(b.id))
@@ -655,80 +829,264 @@ function StackPlanView({ users, agentOpen = false, onDecision, onPrepare, onRese
 
   const selectedFloor = floors.find((floor) => floor.id === selectedFloorId) ?? null
   const summary = useMemo(() => {
-    if (preparing || showingNew) {
-      if (!selectedFloor) return summarizeDraftFloors(floors)
-      return {
-        rows: selectedFloor.editRows,
-        unassigned: selectedFloor.unassigned,
-        total: selectedFloor.total,
-      }
-    }
-    if (!selectedFloor) return summarizeStackPlan({ ...model, floors }, null)
+    if (!selectedFloor) return summarizeDraftFloors(floors)
     return {
       rows: selectedFloor.editRows,
       unassigned: selectedFloor.unassigned,
       total: selectedFloor.total,
     }
-  }, [preparing, showingNew, model, floors, selectedFloor])
+  }, [floors, selectedFloor])
 
-  const runPreparing = (kind, apply) => {
+  const showEmptyDraft = () => {
     prepareTimers.current.forEach((id) => window.clearTimeout(id))
     prepareTimers.current = []
-    setPromptError(null)
+    setPreparing(null)
+    setOpened(true)
+    setDraft(null)
+    setEdits({})
+    setSelectedFloorId(null)
+    setDrag(null)
+    setFloorsReversed(false)
+    onDecision?.({
+      reset: true,
+      message: {
+        id: 'welcome',
+        role: 'agent',
+        text: EMPTY_STACK_BRIEF.text,
+        suggestions: EMPTY_STACK_BRIEF.suggestions,
+      },
+    })
+  }
+
+  const runPreparing = (apply, steps = UPDATE_ACTIVITY) => {
+    prepareTimers.current.forEach((id) => window.clearTimeout(id))
+    prepareTimers.current = []
     setEdits({})
     setSelectedFloorId(null)
     setDrag(null)
     setDraft(null)
-    setPlanVersion('new')
     setOpened(true)
-    setPreparing({ label: kind === 'current' ? 'Loading current stack' : 'Generating new stack plan' })
-    onPrepare?.()
+    setPreparing({ label: 'Crafting your stack plan' })
+    const messageId = `agent-${turnRef.current += 1}`
+    const activityAt = (doneCount) => steps.flatMap((step, index) => {
+      if (index < doneCount) return [{ id: step.id, label: step.done, state: 'done' }]
+      if (index === doneCount && doneCount < steps.length) {
+        return [{ id: step.id, label: step.active, state: 'active' }]
+      }
+      return []
+    })
+    const publish = (doneCount) => onDecision?.({
+      id: messageId,
+      role: 'agent',
+      activity: activityAt(doneCount),
+      loading: true,
+    })
+    publish(0)
+    const slice = Math.round(STACK_PREPARE_MS / (steps.length + 1))
+    for (let index = 1; index <= steps.length; index += 1) {
+      prepareTimers.current.push(window.setTimeout(() => publish(index), slice * index))
+    }
     prepareTimers.current.push(
       window.setTimeout(() => {
-        apply()
+        const extra = apply() ?? {}
+        onDecision?.({
+          id: messageId,
+          role: 'agent',
+          activity: activityAt(steps.length),
+          loading: false,
+          ...extra,
+        })
         setPreparing(null)
       }, STACK_PREPARE_MS),
     )
   }
 
-  const beginDraft = (request) => {
+  const beginDraft = (request, presentation) => {
     if (request.kind === 'prompt' && !request.text.trim()) return
     const result = createStackDraft(users, request)
     if (!result.ok) {
-      setPromptError(result.message)
+      onDecision?.(agentMessage({ text: result.message, suggestions: EMPTY_STACK_BRIEF.suggestions }))
       return
     }
-    setPromptError(null)
-    runPreparing(request.kind === 'basis' ? request.basis : 'prompt', () => {
+    runPreparing(() => {
       setEdits({})
       setSelectedFloorId(null)
       setDrag(null)
-      setPlanVersion('new')
       setOpened(true)
-      setDraft(result.draft)
-      onDecision?.(result.draft.agentBrief)
-    })
+      setDraft(presentation ? { ...result.draft, note: presentation.note, detail: null } : result.draft)
+      return {
+        text: presentation?.text ?? result.draft.agentBrief.text,
+      }
+    }, presentation?.steps)
   }
 
-  const viewCurrentStack = () => {
-    runPreparing('current', () => {
-      setDraft(null)
+  const commitDraft = (nextDraft, text, steps = UPDATE_ACTIVITY) => {
+    runPreparing(() => {
       setEdits({})
       setSelectedFloorId(null)
       setDrag(null)
-      setPlanVersion('current')
       setOpened(true)
-      onDecision?.(CURRENT_STACK_AGENT)
-    })
+      setDraft(nextDraft)
+      return { text }
+    }, steps)
   }
 
-  const beginDraftRef = useRef(beginDraft)
-  beginDraftRef.current = beginDraft
+  const sourceDraft = () => {
+    if (draft) return { source: draft, started: false }
+    const result = createStackDraft(users, { kind: 'basis', basis: 'department' })
+    if (!result.ok) return null
+    return { source: result.draft, started: true }
+  }
+
+  const respond = (id) => {
+    if (id === 'assignments') {
+      onDecision?.(agentMessage({
+        text: 'I’ll build this from the desks people are assigned today. How should I organize the stack plan?',
+        suggestions: GROUPINGS.map((group) => ({
+          id: `assignments:${group.id}`,
+          label: group.label,
+        })),
+      }))
+      return
+    }
+    if (id.startsWith('assignments:')) {
+      const basis = id.slice('assignments:'.length)
+      beginDraft(
+        { kind: 'basis', basis },
+        {
+          note: planNote('assignments', basis),
+          text: generatedPlanCopy('assignments', basis),
+          steps: assignmentActivity(basis),
+        },
+      )
+      return
+    }
+    if (id === 'usage') {
+      onDecision?.(agentMessage({
+        text: 'I’ll build this from desk usage. How should I organize the stack plan?',
+        suggestions: GROUPINGS.map((group) => ({
+          id: `usage:${group.id}`,
+          label: group.label,
+        })),
+      }))
+      return
+    }
+    if (id.startsWith('usage:')) {
+      const basis = id.slice('usage:'.length)
+      const result = createStackDraft(users, { kind: 'basis', basis })
+      if (!result.ok) {
+        onDecision?.(agentMessage({ text: result.message, suggestions: EMPTY_STACK_BRIEF.suggestions }))
+        return
+      }
+      commitDraft(
+        holdBackUnused(result.draft, basis),
+        generatedPlanCopy('usage', basis),
+        usageActivity(basis),
+      )
+      return
+    }
+    if (id === 'free-space') {
+      onDecision?.(agentMessage({
+        text: 'How do you want to free up space?',
+        suggestions: [
+          { id: 'free-space:usage', label: 'Optimize for usage to free up unused desks' },
+          { id: 'free-space:inactivate', label: 'I’m looking to inactivate a floor' },
+        ],
+      }))
+      return
+    }
+    if (id === 'free-space:usage') {
+      onDecision?.(agentMessage({
+        text: 'I’ll build this from desk usage. How should I organize the stack plan?',
+        suggestions: GROUPINGS.map((group) => ({
+          id: `usage:${group.id}`,
+          label: group.label,
+        })),
+      }))
+      return
+    }
+    if (id === 'free-space:inactivate') {
+      onDecision?.(agentMessage({
+        text: 'Which floor should I inactivate?',
+        suggestions: FLOOR_OPTIONS.map((floor) => ({
+          id: `free-space:inactivate:${floor.id}`,
+          label: floor.label,
+        })),
+      }))
+      return
+    }
+    if (id.startsWith('free-space:inactivate:')) {
+      const rest = id.slice('free-space:inactivate:'.length)
+      const group = GROUPINGS.find((item) => rest.endsWith(`:${item.id}`))
+      if (!group) {
+        const floor = FLOOR_OPTIONS.find((item) => item.id === rest)
+        if (!floor) return
+        onDecision?.(agentMessage({
+          text: `I’ll clear ${floor.label} and redistribute its allocations onto the other floors. How should I organize the stack plan?`,
+          suggestions: GROUPINGS.map((item) => ({
+            id: `free-space:inactivate:${floor.id}:${item.id}`,
+            label: item.label,
+          })),
+        }))
+        return
+      }
+      const floorId = rest.slice(0, -(group.id.length + 1))
+      const floor = FLOOR_OPTIONS.find((item) => item.id === floorId)
+      if (!floor) return
+      const result = createStackDraft(users, { kind: 'basis', basis: group.id })
+      if (!result.ok) {
+        onDecision?.(agentMessage({ text: result.message, suggestions: EMPTY_STACK_BRIEF.suggestions }))
+        return
+      }
+      const next = inactivateFloor(result.draft, floor.id, group.id)
+      commitDraft(
+        next.draft,
+        inactivatedPlanCopy(next.floorLabel, group.id, next.leftover),
+        inactivateActivity(group.id, next.floorLabel),
+      )
+      return
+    }
+    if (id === 'growth') {
+      onDecision?.(agentMessage({
+        text: 'Who should I make room for? I will add desks on the floors where that group already sits, using unassigned desks first.',
+        suggestions: [
+          ...DIRECTORY_DEPARTMENTS.map((label) => ({
+            id: `growth:dept:${label}`,
+            label,
+          })),
+          { id: 'growth:all', label: 'A little for every group' },
+        ],
+      }))
+      return
+    }
+    if (id.startsWith('growth:')) {
+      const mode = id.slice('growth:'.length)
+      const base = sourceDraft()
+      if (!base) return
+      const { draft: grown, added } = growDraft(base.source, mode)
+      const who = mode === 'all' ? 'every group' : mode.replace(/^dept:/, '')
+      const change = !added
+        ? 'There aren’t unassigned desks left to give out.'
+        : mode === 'all'
+          ? `I added ${added} ${added === 1 ? 'desk' : 'desks'} across the groups already on each floor, using unassigned desks.`
+          : `I added ${added} ${added === 1 ? 'desk' : 'desks'} for ${who}, using unassigned desks.`
+      const text = base.started ? `I started from current department assignments. ${change}` : change
+      commitDraft(
+        { ...grown, note: added ? `Made room for ${who}` : base.source.note, detail: null },
+        text,
+      )
+    }
+  }
+
+  const respondRef = useRef(respond)
+  respondRef.current = respond
+  const showEmptyRef = useRef(showEmptyDraft)
+  showEmptyRef.current = showEmptyDraft
   const sessionRef = useRef({})
-  sessionRef.current = { opened, preparing, draft, planVersion, users, onDecision, onReset }
+  sessionRef.current = { opened, preparing, draft, users, onDecision, onReset }
   const snapshotRef = useRef(() => null)
   snapshotRef.current = () => {
-    if (!opened || preparing) return null
+    if (!opened || preparing || !draft) return null
     return floors.map((floor) => ({
       id: floor.id,
       desks: floor.desks
@@ -742,8 +1100,8 @@ function StackPlanView({ users, agentOpen = false, onDecision, onPrepare, onRese
     }))
   }
   useImperativeHandle(ref, () => ({
-    startFrom(basis) {
-      beginDraftRef.current({ kind: 'basis', basis })
+    startFrom(id) {
+      respondRef.current(id)
     },
     snapshot() {
       return snapshotRef.current()
@@ -753,7 +1111,7 @@ function StackPlanView({ users, agentOpen = false, onDecision, onPrepare, onRese
       if (
         session.opened &&
         !session.preparing &&
-        (session.draft || session.planVersion === 'current')
+        session.draft
       ) {
         return
       }
@@ -762,46 +1120,22 @@ function StackPlanView({ users, agentOpen = false, onDecision, onPrepare, onRese
       const result = createStackDraft(session.users, { kind: 'basis', basis: 'department' })
       if (!result.ok) return
       setPreparing(null)
-      setPromptError(null)
       setEdits({})
       setSelectedFloorId(null)
       setDrag(null)
-      setPlanVersion('new')
       setDraft(result.draft)
       setOpened(true)
-    },
-    openNew() {
-      prepareTimers.current.forEach((id) => window.clearTimeout(id))
-      prepareTimers.current = []
-      setPreparing(null)
-      setOpened(false)
-      setDraft(null)
-      setEdits({})
-      setSelectedFloorId(null)
-      setDrag(null)
-      setPlanVersion('new')
-      setFloorsReversed(false)
-      setPromptText('')
-      setPromptError(null)
       sessionRef.current.onReset?.()
     },
+    openNew() {
+      showEmptyRef.current()
+    },
   }))
-
-  const returnToPrompt = () => {
-    setOpened(false)
-    setDraft(null)
-    setEdits({})
-    setSelectedFloorId(null)
-    setDrag(null)
-    setPlanVersion('new')
-    setFloorsReversed(false)
-    onReset?.()
-  }
 
   const addAllocation = (category) => {
     if (!selectedFloor) return
     setDraft((current) => {
-      const base = current ?? blankDraft(publishedFloors)
+      const base = current ?? blankDraft(floorModel.floors)
       return {
         ...base,
         floors: base.floors.map((floor) => {
@@ -967,22 +1301,6 @@ function StackPlanView({ users, agentOpen = false, onDecision, onPrepare, onRese
 
   const dragWillMove = drag?.overFloorId ? drag.dropCount : 0
 
-  if (!opened) {
-    return (
-      <StackPrompt
-        text={promptText}
-        error={promptError}
-        onTextChange={(value) => {
-          setPromptText(value)
-          if (promptError) setPromptError(null)
-        }}
-        onSubmit={(value) => beginDraft({ kind: 'prompt', text: value })}
-        onStart={(basis) => beginDraft({ kind: 'basis', basis })}
-        onViewCurrent={viewCurrentStack}
-      />
-    )
-  }
-
   return (
     <div
       className={[
@@ -994,12 +1312,10 @@ function StackPlanView({ users, agentOpen = false, onDecision, onPrepare, onRese
         .join(' ')}
     >
       <StackPlanSidebar
-        planVersion={planVersion}
-        onPlanVersionChange={setPlanVersion}
         summary={summary}
         floorLabel={selectedFloor?.label ?? null}
         editing={editable && Boolean(selectedFloor)}
-        canManage={showingNew && Boolean(selectedFloor) && !preparing}
+        canManage={Boolean(selectedFloor) && !preparing}
         defaultType={draft?.groupType ?? 'department'}
         departments={allocationChoices.departments}
         managers={allocationChoices.managers}
@@ -1012,30 +1328,16 @@ function StackPlanView({ users, agentOpen = false, onDecision, onPrepare, onRese
       <div className="stack-plan-main">
         <div className="stack-plan-main-body">
         <div className="stack-plan-toolbar">
-          {showingNew ? (
-            <div className="stack-plan-draft-note">
-              {draft ? (
-                <>
-                  <div>{draft.note}</div>
-                  {draft.detail ? <div className="stack-plan-draft-detail">{draft.detail}</div> : null}
-                </>
-              ) : (
-                <div>No allocations yet</div>
-              )}
-            </div>
-          ) : (
-            <>
-              <span className="stack-plan-toolbar-label" id="stack-plan-dimension-label">
-                View by
-              </span>
-              <Segmented
-                aria-labelledby="stack-plan-dimension-label"
-                value={dimension}
-                onChange={setDimension}
-                options={DIMENSIONS}
-              />
-            </>
-          )}
+          <div className="stack-plan-draft-note">
+            {draft ? (
+              <>
+                <div>{draft.note}</div>
+                {draft.detail ? <div className="stack-plan-draft-detail">{draft.detail}</div> : null}
+              </>
+            ) : (
+              <div>No allocations yet</div>
+            )}
+          </div>
           <button
             type="button"
             className="stack-plan-sort"
@@ -1045,8 +1347,8 @@ function StackPlanView({ users, agentOpen = false, onDecision, onPrepare, onRese
             <FontAwesomeIcon icon={floorsReversed ? faArrowDown91 : faArrowDown19} />
             {floorsReversed ? 'Highest first' : 'Lowest first'}
           </button>
-          {showingNew ? (
-            <button type="button" className="stack-prompt-restart" onClick={returnToPrompt}>
+          {draft ? (
+            <button type="button" className="stack-prompt-restart" onClick={showEmptyDraft}>
               Start over
             </button>
           ) : null}

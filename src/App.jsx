@@ -735,7 +735,9 @@ function App() {
   /** Directory list, or the full-screen draft editor. */
   const [appView, setAppView] = useState('directory')
   const stackPlanRef = useRef(null)
+  const pendingTurnRef = useRef(null)
   const [agentBrief, setAgentBrief] = useState(null)
+  const [agentMessages, setAgentMessages] = useState([])
   const [stackAgentTab, setStackAgentTab] = useState(false)
   const [assignmentMapView, setAssignmentMapView] = useState('default')
   const [showAssignmentAvatars, setShowAssignmentAvatars] = useState(true)
@@ -1221,17 +1223,45 @@ function App() {
   }, [])
 
   const handleStackDecision = useCallback((brief) => {
-    setAgentBrief(brief)
+    if (brief.reset) {
+      window.clearTimeout(pendingTurnRef.current)
+      pendingTurnRef.current = null
+      setAgentMessages([brief.message])
+      openAgentSidebar()
+      return
+    }
+    setAgentMessages((current) => {
+      const base = current.filter((item) => item.id !== 'agent-pending')
+      const index = base.findIndex((item) => item.id === brief.id)
+      if (index === -1) return [...base, brief]
+      const next = base.slice()
+      next[index] = { ...next[index], ...brief }
+      return next
+    })
     openAgentSidebar()
   }, [openAgentSidebar])
 
   const handleStackReset = useCallback(() => {
+    window.clearTimeout(pendingTurnRef.current)
+    pendingTurnRef.current = null
     setAgentBrief(null)
+    setAgentMessages([])
     closeRightPanel()
   }, [closeRightPanel])
 
-  const handleAgentSuggestion = useCallback((basis) => {
-    stackPlanRef.current?.startFrom(basis)
+  const handleAgentSuggestion = useCallback((suggestion) => {
+    const id = typeof suggestion === 'string' ? suggestion : suggestion.id
+    const label = typeof suggestion === 'string' ? suggestion : suggestion.label
+    window.clearTimeout(pendingTurnRef.current)
+    setAgentMessages((current) => [
+      ...current.map((message) => ({ ...message, suggestions: undefined })),
+      { id: `user:${id}:${Date.now()}`, role: 'user', text: label },
+      { id: 'agent-pending', role: 'agent', spinnerOnly: true, loading: true },
+    ])
+    pendingTurnRef.current = window.setTimeout(() => {
+      pendingTurnRef.current = null
+      stackPlanRef.current?.startFrom(id)
+    }, 450)
   }, [])
 
   const handleStackAgentTab = useCallback((visible) => {
@@ -1307,6 +1337,7 @@ function App() {
   const handlePlanningModeChange = useCallback((nextMode) => {
     setPlanningMode(nextMode)
     setAgentBrief(null)
+    setAgentMessages([])
     queuedRightPanelRef.current = null
     exitingRightPanelRef.current = null
     activeRightPanelRef.current = null
@@ -2778,10 +2809,9 @@ function App() {
             <StackPlanView
               ref={stackPlanRef}
               users={usersWithDirectoryOverrides}
-              agentOpen={activeRightPanel === 'agent' && Boolean(agentBrief)}
+              agentOpen={activeRightPanel === 'agent' && agentMessages.length > 0}
               onDecision={handleStackDecision}
             onReset={handleStackReset}
-            onPrepare={handleStackReset}
             onAgentTabChange={handleStackAgentTab}
           />
             <AgentSidebar
@@ -2790,7 +2820,7 @@ function App() {
               onClose={closeRightPanel}
               onExited={() => finishRightPanelExit('agent')}
               selectedUsers={agentContextUsers}
-              brief={agentBrief}
+              messages={agentMessages}
               onSuggestion={handleAgentSuggestion}
               showTab={stackAgentTab}
             />
