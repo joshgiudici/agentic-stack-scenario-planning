@@ -59,7 +59,7 @@ import {
   viewAvatarColorByUserId,
 } from './assignmentMapData.js'
 import { buildScenarioFromStack } from './scenarioFromStack.js'
-import DraftDirectory, { PrototypeModeSwitcher } from './DraftDirectory.jsx'
+import DraftDirectory from './DraftDirectory.jsx'
 
 /** Set true to bring back the directory/queue column in Assignments. */
 const SHOW_ASSIGNMENT_PEOPLE_SIDEBAR = false
@@ -1319,12 +1319,6 @@ function App() {
       setFocusedDesk(null)
     }
   }, [])
-
-  const openDraftChooser = (mode, view) => {
-    if (mode !== planningMode) handlePlanningModeChange(mode)
-    if (mode === 'scenario-planning' && view === 'draft') openScenarioDraftAgent()
-    setAppView(view)
-  }
 
   const selectFloor = (floorId) => {
     if (floorId !== currentFloorId && leftSidebarTab === 'queue') {
@@ -3488,8 +3482,6 @@ function App() {
         </div>
         )}
         </div>
-
-        <PrototypeModeSwitcher mode={planningMode} view={appView} onChoose={openDraftChooser} />
       </div>
     </ConfigProvider>
   )

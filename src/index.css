@@ -2637,60 +2637,6 @@ body.app--directory-dragging .desk-tile {
   flex-shrink: 0;
 }
 
-.draft-control-panel {
-  position: fixed;
-  left: 50%;
-  bottom: 16px;
-  z-index: 10500;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 340px;
-  padding: 12px 14px;
-  transform: translateX(-50%);
-  border: 1px solid #3d3d48;
-  border-radius: 10px;
-  background: #1c1c22;
-  color: #ececf0;
-  box-shadow:
-    0 8px 28px rgba(0, 0, 0, 0.34),
-    0 0 0 1px rgba(255, 255, 255, 0.04) inset;
-}
-
-.draft-control-panel-title {
-  font-size: 11px;
-  font-weight: var(--font-weight-strong);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #9b9bab;
-}
-
-.draft-control-panel-segmented.ant-segmented {
-  width: 100%;
-  padding: 3px;
-  background: #2a2a34;
-}
-
-.draft-control-panel-segmented .ant-segmented-item {
-  flex: 1;
-  color: #b8b8c4;
-}
-
-.draft-control-panel-segmented .ant-segmented-item-selected {
-  color: #f4f4f8;
-  background: #454556;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28);
-}
-
-.draft-control-panel-segmented .ant-segmented-item-label {
-  min-height: 28px;
-  line-height: 28px;
-  padding: 0 8px;
-  font-size: 12px;
-  white-space: nowrap;
-  text-align: center;
-}
-
 .stack-plan-shell {
   position: relative;
   flex: 1;
@@ -4263,77 +4209,6 @@ body.stack-allocation-dragging .stack-floor-card--drop-disabled * {
 
 .draft-takeover[hidden] {
   display: none;
-}
-
-.draft-control-modes {
-  display: flex;
-  gap: 6px;
-}
-
-.draft-control-mode {
-  position: relative;
-  flex: 1;
-}
-
-.draft-control-mode-button {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  min-height: 32px;
-  padding: 0 10px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: #b8b8c4;
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.draft-control-mode-button--selected,
-.draft-control-mode-button[aria-expanded='true'] {
-  color: #f4f4f8;
-  background: #454556;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28);
-}
-
-.draft-control-menu {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 8px);
-  left: 0;
-  display: flex;
-  flex-direction: column;
-  padding: 4px;
-  border: 1px solid #3d3d48;
-  border-radius: 8px;
-  background: #2a2a34;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-}
-
-.draft-control-menu button {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  min-height: 32px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: #ececf0;
-  font: inherit;
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.draft-control-menu button:hover,
-.draft-control-menu button.is-current {
-  background: #454556;
 }
 
 .robin-app {

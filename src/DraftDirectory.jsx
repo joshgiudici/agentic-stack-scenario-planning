@@ -1,15 +1,13 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
   faBell,
   faBuilding,
   faCalendarDays,
   faChartColumn,
-  faCheck,
   faChevronDown,
   faChevronLeft,
   faChevronRight,
-  faChevronUp,
   faDoorOpen,
   faEllipsis,
   faGear,
@@ -315,84 +313,6 @@ function DraftDirectory({ mode, onOpenDraft, onOpenNewDraft, onNavigate }) {
           </div>
         </div>
       </main>
-    </div>
-  )
-}
-
-const SWITCHER_MODES = [
-  { id: 'stack-planning', label: 'Stack planning' },
-  { id: 'scenario-planning', label: 'Scenario planning' },
-]
-
-export function PrototypeModeSwitcher({ mode, view, onChoose }) {
-  const [openMode, setOpenMode] = useState(null)
-  const panelRef = useRef(null)
-
-  useEffect(() => {
-    if (!openMode) return undefined
-    const close = (event) => {
-      if (panelRef.current?.contains(event.target)) return
-      setOpenMode(null)
-    }
-    document.addEventListener('pointerdown', close)
-    return () => document.removeEventListener('pointerdown', close)
-  }, [openMode])
-
-  return (
-    <div className="draft-control-panel" role="region" aria-label="Planning mode" ref={panelRef}>
-      <div className="draft-control-panel-title">Planning mode</div>
-      <div className="draft-control-modes">
-        {SWITCHER_MODES.map((item) => {
-          const open = openMode === item.id
-          return (
-            <div key={item.id} className="draft-control-mode">
-              {open ? (
-                <div className="draft-control-menu" role="menu" aria-label={item.label}>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className={mode === item.id && view === 'directory' ? 'is-current' : ''}
-                    onClick={() => {
-                      setOpenMode(null)
-                      onChoose(item.id, 'directory')
-                    }}
-                  >
-                    <span>Draft list</span>
-                    {mode === item.id && view === 'directory' ? <FontAwesomeIcon icon={faCheck} /> : null}
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className={mode === item.id && view === 'draft' ? 'is-current' : ''}
-                    onClick={() => {
-                      setOpenMode(null)
-                      onChoose(item.id, 'draft')
-                    }}
-                  >
-                    <span>Opened draft</span>
-                    {mode === item.id && view === 'draft' ? <FontAwesomeIcon icon={faCheck} /> : null}
-                  </button>
-                </div>
-              ) : null}
-              <button
-                type="button"
-                className={[
-                  'draft-control-mode-button',
-                  mode === item.id ? 'draft-control-mode-button--selected' : '',
-                ]
-                  .filter(Boolean)
-                  .join(' ')}
-                aria-expanded={open}
-                aria-haspopup="menu"
-                onClick={() => setOpenMode(open ? null : item.id)}
-              >
-                <span>{item.label}</span>
-                <FontAwesomeIcon icon={open ? faChevronUp : faChevronDown} />
-              </button>
-            </div>
-          )
-        })}
-      </div>
     </div>
   )
 }
