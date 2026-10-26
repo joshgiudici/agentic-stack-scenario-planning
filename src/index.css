@@ -2792,6 +2792,11 @@ body.app--directory-dragging .desk-tile {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
 }
 
+.neighborhood-map-label--neutral {
+  color: #8c8c8c;
+  border-color: #8c8c8c;
+}
+
 .neighborhood-map-label--dimmed {
   opacity: 0.35;
 }
@@ -2856,10 +2861,46 @@ body.app--directory-dragging .desk-tile {
 
 .stack-plan-sidebar {
   min-height: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
   background: var(--color-bg-container);
   border-right: var(--line-width) solid var(--cmp-card-border);
+}
+
+.stack-floor-drawer {
+  position: fixed;
+  top: 56px;
+  left: 0;
+  bottom: 0;
+  z-index: 35;
+  width: 280px;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-container);
+  box-shadow: 8px 0 24px rgba(0, 0, 0, 0.12);
+  transform: translateX(-100%);
+  transition: transform 0.32s cubic-bezier(0.33, 1, 0.68, 1);
+  will-change: transform;
+  pointer-events: none;
+}
+
+.stack-floor-drawer--visible {
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+.stack-floor-drawer > .stack-plan-sidebar {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border-right: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stack-floor-drawer {
+    transition-duration: 0.01ms;
+  }
 }
 
 .stack-plan-floor-header {
@@ -3199,6 +3240,16 @@ body.app--directory-dragging .desk-tile {
   opacity: 0.38;
   pointer-events: none;
   user-select: none;
+}
+
+.app-workspace-body--preparing .app-workspace-main {
+  opacity: 0.38;
+  pointer-events: none;
+  user-select: none;
+}
+
+.app-workspace-body--agent .stack-plan-loading {
+  right: 340px;
 }
 
 .stack-plan-loading {

@@ -729,6 +729,70 @@ function NeighborhoodPieChart({ gradient }) {
   )
 }
 
+const CONVERT_PREPARE_MS = 3000
+const CONVERT_SPINNER_MS = 450
+
+function convertSteps(mode) {
+  if (mode === 'neighborhoods') {
+    return [
+      { id: 'read', active: 'Reading the stack plan allocations...', done: 'Read the stack plan allocations' },
+      { id: 'neighborhoods', active: 'Crafting neighborhoods from those allocations...', done: 'Crafted neighborhoods from those allocations' },
+      { id: 'place', active: 'Placing neighborhoods on the floor plan...', done: 'Placed neighborhoods on the floor plan' },
+    ]
+  }
+  if (mode === 'assign') {
+    return [
+      { id: 'read', active: 'Reading the stack plan allocations...', done: 'Read the stack plan allocations' },
+      { id: 'match', active: 'Matching people to the stack plan groups...', done: 'Matched people to the stack plan groups' },
+      { id: 'assign', active: 'Assigning desks on the floor plan...', done: 'Assigned desks on the floor plan' },
+    ]
+  }
+  return [
+    { id: 'read', active: 'Reading the stack plan allocations...', done: 'Read the stack plan allocations' },
+    { id: 'neighborhoods', active: 'Crafting neighborhoods from the stack plan allocations...', done: 'Crafted neighborhoods from the stack plan allocations' },
+    { id: 'assign', active: 'Assigning people to desks in those neighborhoods...', done: 'Assigned people to desks in those neighborhoods' },
+  ]
+}
+
+function convertActivity(steps, doneCount) {
+  return steps.flatMap((step, index) => {
+    if (index < doneCount) return [{ id: step.id, label: step.done, state: 'done' }]
+    if (index === doneCount && doneCount < steps.length) {
+      return [{ id: step.id, label: step.active, state: 'active' }]
+    }
+    return []
+  })
+}
+
+function convertSummary(mode, result) {
+  const names = new Set()
+  for (const list of Object.values(result.neighborhoods?.byFloor ?? {})) {
+    for (const neighborhood of list) names.add(neighborhood.name)
+  }
+  const neighborhoodCount = names.size
+  const assignedCount = result.assignmentOverrides
+    ? Object.values(result.assignmentOverrides).filter((slot) => slot?.deskId).length
+    : 0
+  const neighborhoods = `${neighborhoodCount} ${neighborhoodCount === 1 ? 'neighborhood' : 'neighborhoods'}`
+  const people = `${assignedCount} ${assignedCount === 1 ? 'person' : 'people'}`
+  if (mode === 'neighborhoods') {
+    return [
+      'I’ve generated a scenario plan from your stack plan.',
+      `I crafted ${neighborhoods} from the stack plan’s allocations and placed them on the floor plan.`,
+    ].join('\n\n')
+  }
+  if (mode === 'assign') {
+    return [
+      'I’ve generated a scenario plan from your stack plan.',
+      `I assigned ${people} to desks based on the stack plan’s allocations.`,
+    ].join('\n\n')
+  }
+  return [
+    'I’ve generated a scenario plan from your stack plan.',
+    `I crafted ${neighborhoods} from the stack plan’s allocations and automatically assigned ${people} to desks within those neighborhoods.`,
+  ].join('\n\n')
+}
+
 function App() {
   /** Top-level mode: floor charts vs map-based scenario planning. */
   const [planningMode, setPlanningMode] = useState('stack-planning')
@@ -798,6 +862,9 @@ function App() {
   /** Prototype: assign desk from directory without persisting to `directoryUserDb`. */
   const [directoryAssignmentOverrides, setDirectoryAssignmentOverrides] = useState({})
   const [scenarioNeighborhoods, setScenarioNeighborhoods] = useState(null)
+  const [scenarioPreparing, setScenarioPreparing] = useState(false)
+  const convertTimersRef = useRef([])
+  const convertMessageIdRef = useRef(null)
   const [convertOpen, setConvertOpen] = useState(false)
   const [convertReady, setConvertReady] = useState(false)
   const [convertMode, setConvertMode] = useState('both')
@@ -1222,12 +1289,11 @@ function App() {
     setActiveRightPanel('agent')
   }, [])
 
-  const handleStackDecision = useCallback((brief) => {
+  const upsertAgentMessage = useCallback((brief) => {
     if (brief.reset) {
       window.clearTimeout(pendingTurnRef.current)
       pendingTurnRef.current = null
       setAgentMessages([brief.message])
-      openAgentSidebar()
       return
     }
     setAgentMessages((current) => {
@@ -1238,8 +1304,12 @@ function App() {
       next[index] = { ...next[index], ...brief }
       return next
     })
+  }, [])
+
+  const handleStackDecision = useCallback((brief) => {
+    upsertAgentMessage(brief)
     openAgentSidebar()
-  }, [openAgentSidebar])
+  }, [openAgentSidebar, upsertAgentMessage])
 
   const handleStackReset = useCallback(() => {
     window.clearTimeout(pendingTurnRef.current)
@@ -1300,16 +1370,30 @@ function App() {
     setConvertOpen(true)
   }
 
+  const cancelScenarioBuild = useCallback(() => {
+    convertTimersRef.current.forEach((id) => window.clearTimeout(id))
+    convertTimersRef.current = []
+    const messageId = convertMessageIdRef.current
+    convertMessageIdRef.current = null
+    setScenarioPreparing(false)
+    if (!messageId) return
+    setAgentMessages((current) => current.filter((item) => item.id !== 'agent-pending' && item.id !== messageId))
+  }, [])
+
   const confirmConvert = () => {
     const floors = stackPlanRef.current?.snapshot()
     if (!floors) return
-    const createNeighborhoods = convertMode === 'both' || convertMode === 'neighborhoods'
-    const assignDesks = convertMode === 'both' || convertMode === 'assign'
-    const result = buildScenarioFromStack({ floors, users: allUsers, mode: convertMode })
-    setScenarioNeighborhoods(createNeighborhoods ? result.neighborhoods : null)
-    if (assignDesks) setDirectoryAssignmentOverrides(result.assignmentOverrides)
-    else setDirectoryAssignmentOverrides({})
+    const mode = convertMode
+    const createNeighborhoods = mode === 'both' || mode === 'neighborhoods'
+    window.clearTimeout(pendingTurnRef.current)
+    pendingTurnRef.current = null
+    convertTimersRef.current.forEach((id) => window.clearTimeout(id))
+    convertTimersRef.current = []
     setConvertOpen(false)
+    setPlanningMode('scenario-planning')
+    setScenarioPreparing(true)
+    setScenarioNeighborhoods(null)
+    setDirectoryAssignmentOverrides({})
     setAssignmentMapView(createNeighborhoods ? 'neighborhood' : 'default')
     setShowNeighborhoodLabels(true)
     setCurrentFloorId('floor-1')
@@ -1318,12 +1402,45 @@ function App() {
     setDeskPanelOpen(false)
     setFocusedDesk(null)
     setSelectedUserIds([])
-    handlePlanningModeChange('scenario-planning')
     openScenarioDraftAgent()
     setAppView('draft')
+    setAgentMessages((current) => [
+      ...current.filter((item) => item.id !== 'agent-pending'),
+      { id: 'agent-pending', role: 'agent', spinnerOnly: true, loading: true },
+    ])
+    const messageId = `agent-convert-${Date.now()}`
+    convertMessageIdRef.current = messageId
+    const steps = convertSteps(mode)
+    const publish = (doneCount) => upsertAgentMessage({
+      id: messageId,
+      role: 'agent',
+      activity: convertActivity(steps, doneCount),
+      loading: true,
+    })
+    const slice = Math.round(CONVERT_PREPARE_MS / (steps.length + 1))
+    convertTimersRef.current.push(window.setTimeout(() => publish(0), CONVERT_SPINNER_MS))
+    for (let index = 1; index <= steps.length; index += 1) {
+      convertTimersRef.current.push(window.setTimeout(() => publish(index), CONVERT_SPINNER_MS + slice * index))
+    }
+    convertTimersRef.current.push(window.setTimeout(() => {
+      const result = buildScenarioFromStack({ floors, users: allUsers, mode })
+      const assignDesks = mode === 'both' || mode === 'assign'
+      setScenarioNeighborhoods(createNeighborhoods ? result.neighborhoods : null)
+      setDirectoryAssignmentOverrides(assignDesks ? result.assignmentOverrides : {})
+      upsertAgentMessage({
+        id: messageId,
+        role: 'agent',
+        activity: steps.map((step) => ({ id: step.id, label: step.done, state: 'done' })),
+        loading: false,
+        text: convertSummary(mode, result),
+      })
+      convertMessageIdRef.current = null
+      setScenarioPreparing(false)
+    }, CONVERT_PREPARE_MS + CONVERT_SPINNER_MS))
   }
 
   const showDirectory = (mode) => {
+    cancelScenarioBuild()
     if (mode !== planningMode) handlePlanningModeChange(mode)
     setAppView('directory')
   }
@@ -1335,6 +1452,10 @@ function App() {
   }
 
   const handlePlanningModeChange = useCallback((nextMode) => {
+    convertTimersRef.current.forEach((id) => window.clearTimeout(id))
+    convertTimersRef.current = []
+    convertMessageIdRef.current = null
+    setScenarioPreparing(false)
     setPlanningMode(nextMode)
     setAgentBrief(null)
     setAgentMessages([])
@@ -2790,7 +2911,7 @@ function App() {
             <div className="app-title">{isStackPlanView ? 'New stack plan draft' : 'New Draft 1234'}</div>
           </div>
           <div className="app-header-right">
-            <Button className="header-button" onClick={() => setAppView('directory')}>
+            <Button className="header-button" onClick={() => { cancelScenarioBuild(); setAppView('directory') }}>
               Close
             </Button>
             <Button className="header-button">Share</Button>
@@ -2876,7 +2997,11 @@ function App() {
             </div>
           </div>
         ) : null}
-        <div className="app-workspace-body">
+        <div className={[
+          'app-workspace-body',
+          scenarioPreparing ? 'app-workspace-body--preparing' : '',
+          activeRightPanel === 'agent' ? 'app-workspace-body--agent' : '',
+        ].filter(Boolean).join(' ')}>
         <div className="app-workspace-main">
         <div
           className={[
@@ -3291,18 +3416,20 @@ function App() {
                     : null}
                   {isAssignmentsView && showNeighborhoodLabels
                     ? assignmentLabelAnchors.map((label) => {
+                        const colorByNeighborhood = assignmentMapView === 'neighborhood'
                         const isLabelDimmed =
                           focusedAllocationKey &&
-                          assignmentMapView === 'neighborhood' &&
+                          colorByNeighborhood &&
                           focusedAllocationKey !== label.id
                         const isLabelActive =
-                          assignmentMapView === 'neighborhood' && focusedAllocationKey === label.id
+                          colorByNeighborhood && focusedAllocationKey === label.id
                         return (
                           <button
                             key={label.id}
                             type="button"
                             className={[
                               'neighborhood-map-label',
+                              colorByNeighborhood ? '' : 'neighborhood-map-label--neutral',
                               isLabelDimmed ? 'neighborhood-map-label--dimmed' : '',
                               isLabelActive ? 'neighborhood-map-label--active' : '',
                             ]
@@ -3311,8 +3438,9 @@ function App() {
                             style={{
                               left: `${label.x}px`,
                               top: `${label.y}px`,
-                              color: label.labelColor,
-                              borderColor: label.labelColor,
+                              ...(colorByNeighborhood
+                                ? { color: label.labelColor, borderColor: label.labelColor }
+                                : null),
                             }}
                             aria-pressed={isLabelActive}
                             onClick={() => selectNeighborhoodFromMap(label.id)}
@@ -3399,6 +3527,16 @@ function App() {
           ) : null}
         </div>
         </div>
+        {scenarioPreparing ? (
+          <div className="stack-plan-loading" role="status" aria-live="polite" aria-busy="true">
+            <div className="stack-plan-loading-spinner" aria-hidden>
+              {Array.from({ length: 8 }, (_, index) => (
+                <span key={index} style={{ transform: `rotate(${index * 45}deg)` }} />
+              ))}
+            </div>
+            <div className="stack-plan-loading-label">Crafting your scenario plan</div>
+          </div>
+        ) : null}
 
         <AgentSidebar
           open={activeRightPanel === 'agent'}
@@ -3406,7 +3544,7 @@ function App() {
           onClose={closeRightPanel}
           onExited={() => finishRightPanelExit('agent')}
           selectedUsers={agentContextUsers}
-          brief={agentBrief}
+          messages={agentMessages}
           onSuggestion={handleAgentSuggestion}
           showTab={!agentFooterSidebarOpen}
         />

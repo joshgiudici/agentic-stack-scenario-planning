@@ -760,6 +760,12 @@ function paintDesks(floor, rows) {
 
 function StackPlanView({ users, agentOpen = false, onDecision, onReset, onAgentTabChange }, ref) {
   const [selectedFloorId, setSelectedFloorId] = useState(null)
+  const [drawerFloorId, setDrawerFloorId] = useState(null)
+  const [drawerEntered, setDrawerEntered] = useState(false)
+  const drawerOpenRef = useRef(false)
+  const drawerPanelRef = useRef(null)
+  const selectedFloorIdRef = useRef(selectedFloorId)
+  selectedFloorIdRef.current = selectedFloorId
   const [opened, setOpened] = useState(false)
   const [draft, setDraft] = useState(null)
   const [preparing, setPreparing] = useState(null)
@@ -828,14 +834,31 @@ function StackPlanView({ users, agentOpen = false, onDecision, onReset, onAgentT
   }, [floors, floorsReversed])
 
   const selectedFloor = floors.find((floor) => floor.id === selectedFloorId) ?? null
-  const summary = useMemo(() => {
-    if (!selectedFloor) return summarizeDraftFloors(floors)
-    return {
-      rows: selectedFloor.editRows,
-      unassigned: selectedFloor.unassigned,
-      total: selectedFloor.total,
+  const drawerFloor = floors.find((floor) => floor.id === drawerFloorId) ?? null
+  const buildingSummary = useMemo(() => summarizeDraftFloors(floors), [floors])
+
+  useEffect(() => {
+    if (selectedFloorId) {
+      setDrawerFloorId(selectedFloorId)
+      if (drawerOpenRef.current) return undefined
+      setDrawerEntered(false)
+      const timer = window.setTimeout(() => {
+        drawerOpenRef.current = true
+        setDrawerEntered(true)
+      }, 32)
+      return () => window.clearTimeout(timer)
     }
-  }, [floors, selectedFloor])
+    drawerOpenRef.current = false
+    setDrawerEntered(false)
+    return undefined
+  }, [selectedFloorId])
+
+  const finishDrawerExit = (event) => {
+    if (event.target !== drawerPanelRef.current) return
+    if (event.propertyName !== 'transform') return
+    if (selectedFloorIdRef.current) return
+    setDrawerFloorId(null)
+  }
 
   const showEmptyDraft = () => {
     prepareTimers.current.forEach((id) => window.clearTimeout(id))
@@ -1312,19 +1335,45 @@ function StackPlanView({ users, agentOpen = false, onDecision, onReset, onAgentT
         .join(' ')}
     >
       <StackPlanSidebar
-        summary={summary}
-        floorLabel={selectedFloor?.label ?? null}
-        editing={editable && Boolean(selectedFloor)}
-        canManage={Boolean(selectedFloor) && !preparing}
+        summary={buildingSummary}
+        floorLabel={null}
+        editing={false}
+        canManage={false}
         defaultType={draft?.groupType ?? 'department'}
         departments={allocationChoices.departments}
         managers={allocationChoices.managers}
-        unassignedMax={selectedFloor?.unassigned ?? 0}
+        unassignedMax={0}
         onCountChange={changeFloorCount}
         onAddAllocation={addAllocation}
         onRemoveAllocation={removeAllocation}
         onClearFloor={() => setSelectedFloorId(null)}
       />
+      {drawerFloor ? (
+        <div
+          ref={drawerPanelRef}
+          className={['stack-floor-drawer', drawerEntered ? 'stack-floor-drawer--visible' : ''].filter(Boolean).join(' ')}
+          onTransitionEnd={finishDrawerExit}
+        >
+          <StackPlanSidebar
+            summary={{
+              rows: drawerFloor.editRows,
+              unassigned: drawerFloor.unassigned,
+              total: drawerFloor.total,
+            }}
+            floorLabel={drawerFloor.label}
+            editing={editable && drawerFloor.id === selectedFloorId}
+            canManage={drawerFloor.id === selectedFloorId && !preparing}
+            defaultType={draft?.groupType ?? 'department'}
+            departments={allocationChoices.departments}
+            managers={allocationChoices.managers}
+            unassignedMax={drawerFloor.unassigned}
+            onCountChange={changeFloorCount}
+            onAddAllocation={addAllocation}
+            onRemoveAllocation={removeAllocation}
+            onClearFloor={() => setSelectedFloorId(null)}
+          />
+        </div>
+      ) : null}
       <div className="stack-plan-main">
         <div className="stack-plan-main-body">
         <div className="stack-plan-toolbar">
